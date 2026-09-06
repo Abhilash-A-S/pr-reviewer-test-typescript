@@ -102,9 +102,13 @@ function unsafeParseUser(payload: string): User {
 }
 
 function safeParseUser(payload: string): User {
-  const parsed: unknown = JSON.parse(payload);
-  if (!isUser(parsed)) throw new Error('Invalid user payload');
-  return parsed;
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    if (!isUser(parsed)) throw new Error('Invalid user payload');
+    return parsed;
+  } catch (error: unknown) {
+    throw new Error('Unable to parse user payload', { cause: error });
+  }
 }
 
 function unsafeConvert(value: unknown): number {
@@ -175,7 +179,18 @@ async function safeSearch(signal: AbortSignal): Promise<SearchResponse> {
   try {
     const response = await fetch('/api/search', { signal });
     if (!response.ok) throw new Error(`Search failed: ${response.status}`);
-    return (await response.json()) as SearchResponse;
+    const payload: unknown = await response.json();
+    if (typeof payload !== 'object' || payload === null) {
+      throw new TypeError('Invalid search response');
+    }
+    const candidate = payload as Record<string, unknown>;
+    if (!Array.isArray(candidate.users) || !candidate.users.every(isUser)) {
+      throw new TypeError('Invalid search users');
+    }
+    return {
+      users: candidate.users,
+      nextPage: typeof candidate.nextPage === 'string' ? candidate.nextPage : undefined,
+    };
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new Error('Unable to search', { cause: error });
@@ -235,11 +250,11 @@ class UnsafeLiveUpdates {
 
 class SafeLiveUpdates {
   private timer?: ReturnType<typeof setInterval>;
-  private readonly onResize = (): void => console.log('resized');
+  private readonly onResize = (): void => undefined;
 
   start(): void {
     this.stop();
-    this.timer = setInterval(() => console.log('refresh'), 1_000);
+    this.timer = setInterval(() => undefined, 1_000);
     window.addEventListener('resize', this.onResize);
   }
 
@@ -259,7 +274,7 @@ function unsafeObserver(element: Element): MutationObserver {
 }
 
 function safeObserver(element: Element): () => void {
-  const observer = new MutationObserver(() => console.log('changed'));
+  const observer = new MutationObserver(() => undefined);
   observer.observe(element, { childList: true });
   return () => observer.disconnect();
 }
